@@ -6,9 +6,9 @@ import time
 # ============ PARAMETERS ============
 FS = 250  # Sampling frequency (Hz)
 CHANNEL = 1  # Which EMG channel to use
-MVC = 0.75  # Replace with your subject’s measured max voluntary contraction (in Volts)
+MVC = 0.0006  # Replace with your subject’s measured max voluntary contraction (in Volts)
 WINDOW_SIZE = 1  # seconds for RMS window
-FATIGUE_THRESHOLD = 0.6  # proportion of MVC at which fatigue flag triggers
+FATIGUE_THRESHOLD = 1  # proportion of MVC at which fatigue flag triggers
 # ====================================
 
 # Bandpass filter for EMG
@@ -50,5 +50,5 @@ def handle_sample(sample):
 # ============ CONNECT TO BOARD ============
 if __name__ == "__main__":
     print("Connecting to OpenBCI board...")
-    board = OpenBCICyton(port='COM3', daisy=False)  # change COM port as needed
+    board = OpenBCICyton(port='COM7', daisy=False)  # change COM port as needed
     board.start_stream(handle_sample)
