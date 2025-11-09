@@ -112,6 +112,8 @@ def begin_calibration(data):
 
 # MAIN
 if __name__ == '__main__':
+    
+    socketio.run(app, debug=True, port=8080)
     print("Looking for an OpenBCI LSL stream...")
     streams = resolve_byprop('type', 'EEG')  # Could also be 'EMG'
     inlet1 = StreamInlet(streams[0])

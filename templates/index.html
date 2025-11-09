@@ -13,7 +13,6 @@
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- Apply Inter Tight globally -->
   <style>
     body {
       font-family: 'Inter Tight', sans-serif;
@@ -24,42 +23,51 @@
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 </head>
 
-
 <body class="bg-gray-100 text-gray-800 flex flex-col items-center min-h-screen p-6">
 
-  <!-- Header -->
-  <h1 class="text-4xl font-bold mb-8 text-gray-900">Physiotherapy Client Dashboard</h1>
+
 
   <!-- Main grid -->
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-5xl">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-5xl pt-5">
 
-    <!-- Webcam Placeholder -->
-    <div class="bg-white rounded-2xl  flex flex-col items-center justify-center h-80">
-      <div class="border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center w-full h-full">
+    <!-- Webcam Placeholder spanning 2 columns -->
+    <div class="md:col-span-2 bg-white flex flex-col items-center  justify-center h-80  shadow">
+      <div class="border-2 border-dashed border-gray-300 flex items-center justify-center w-full h-full ">
         <p class="text-gray-400 text-lg">Your Webcam</p>
       </div>
     </div>
+    <!-- Header -->
+    <p class="md:col-span-2 py-[0px] text-xl font-medium tracking-tighter text-gray-900 text-center">Physiotherapy
+      Client
+      Dashboard
+    </p>
+    <!-- Exertion Display below webcam (compact, left text + right button) -->
+    <div class="md:col-span-2 bg-white p-4 shadow">
+      <div class="flex flex-row items-center justify-between gap-4">
+        <!-- Left: header and numbers, left-justified -->
+        <div class="flex flex-col items-start">
+          <h2 class="text-lg font-semibold text-gray-700 mb-1">Current Exertion</h2>
+          <p id="counter" class="text-4xl md:text-5xl font-bold text-sky-900">0</p>
+          <p class="text-gray-400 mt-1 text-sm">(%MVC or intensity value)</p>
+        </div>
 
-    <!-- Exertion Display -->
-    <div class="bg-white rounded-2xl p-8 flex flex-col items-center justify-center">
-      <h2 class="text-2xl font-semibold text-gray-700 mb-4">Current Exertion</h2>
-      <p id="counter" class="text-6xl font-bold text-sky-900">0</p>
-      <p class="text-gray-400 mt-2">(%MVC or intensity value)</p>
-
-      <!-- Interactive Button -->
-      <button id="actionBtn"
-        class="mt-6 px-6 py-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow transition-all">
-        Start Calibration
-      </button>
+        <!-- Right: button, aligned to the right -->
+        <div class="flex items-center">
+          <button id="actionBtn" class="px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded shadow transition-all">
+            Start Calibration
+          </button>
+        </div>
+      </div>
     </div>
 
-    <!-- Advice / Text Output -->
-    <div class="md:col-span-2 bg-white rounded-2xl p-6">
+    <!-- Advice / Text Output below exertion -->
+    <div class="md:col-span-2 bg-white p-6  shadow">
       <h3 class="text-xl font-semibold text-gray-700 mb-3">Advice & Insights</h3>
       <p id="advice" class="text-gray-500">
         Real-time analysis, coaching feedback, or EMG-based advice.
       </p>
     </div>
+
   </div>
 
   <script>
