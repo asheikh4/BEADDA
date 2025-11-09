@@ -1,8 +1,9 @@
 # src/CV/main.py
 # Webcam app that uses MediaPipe Pose + your exercises metrics.
-# Keys: [1]=Squat  [2]=Wall-sit  [3]=Curl  [ESC]=Quit
+# Keys: [1]=Squat  [2]=Wall-sit  [3]=Curl  [R]=Reset  [L]=Left arm  [Q]=Right arm  [ESC]=Quit
 
 import sys
+import time
 from pathlib import Path
 
 # Add the current directory to Python path for imports
@@ -14,7 +15,8 @@ import cv2
 import numpy as np
 import mediapipe as mp
 from pose_utils import put, draw_angle_with_arc, EMA, MedianFilter, HoldTimer
-from exercises import squat_metrics, wallsit_metrics, curl_metrics, RepCounter
+from exercises import (squat_metrics, wallsit_metrics, curl_metrics, RepCounter, 
+                       LumbarExcursionTracker)
 
 # ---------------- Config ----------------
 CAM_INDEX = 0
@@ -23,11 +25,14 @@ MODEL_COMPLEXITY = 2
 MIN_DET_CONF = 0.70
 MIN_TRK_CONF = 0.70
 
-# Rep thresholds (for knee/elbow angles). Tune to your liking.
+# Rep thresholds (for knee/elbow angles)
+# Squat: based on depth thresholds (100° perfect, so 95° ensures full depth)
 SQUAT_BOTTOM_DEG = 95.0
 SQUAT_TOP_DEG    = 140.0
-CURL_BOTTOM_DEG  = 50.0
-CURL_TOP_DEG     = 130.0
+# Curl: based on research (45° perfect contraction, so 45° ensures full contraction)
+# Top is when arm is extended (~130-160° typical)
+CURL_BOTTOM_DEG  = 45.0  # Full contraction (research-based)
+CURL_TOP_DEG     = 130.0  # Extended arm
 
 # ---------------- Setup ----------------
 mp_pose   = mp.solutions.pose
@@ -35,12 +40,23 @@ mp_draw   = mp.solutions.drawing_utils
 mp_styles = mp.solutions.drawing_styles
 
 def draw_legend(frame):
+    """Draw the tolerance zone legend with adaptive positioning."""
+    if frame is None or frame.size == 0:
+        return
+    h, w = frame.shape[:2]
+    legend_width = min(210, w // 4)  # Adaptive width
+    legend_x = max(10, w - legend_width - 10)
     legend_y = 30
-    legend_x = frame.shape[1] - 210
+    legend_height = 100
+    
+    # Ensure legend fits on screen
+    if legend_y + legend_height > h:
+        legend_y = max(10, h - legend_height - 10)
+    
     cv2.rectangle(frame, (legend_x - 10, legend_y - 20),
-                  (frame.shape[1] - 10, legend_y + 100), (0, 0, 0), -1)
+                  (min(w - 10, legend_x + legend_width), legend_y + legend_height), (0, 0, 0), -1)
     cv2.rectangle(frame, (legend_x - 10, legend_y - 20),
-                  (frame.shape[1] - 10, legend_y + 100), (255, 255, 255), 1)
+                  (min(w - 10, legend_x + legend_width), legend_y + legend_height), (255, 255, 255), 1)
     cv2.putText(frame, "Tolerance Zones:", (legend_x, legend_y),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
     cv2.putText(frame, "GREEN = Perfect",     (legend_x, legend_y + 20),
@@ -52,13 +68,180 @@ def draw_legend(frame):
     cv2.putText(frame, "RED = Needs Work",    (legend_x, legend_y + 80),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1, cv2.LINE_AA)
 
+def render_squat(frame, m, knee, reps, phase, cues, lumbar_excursion_deg=None):
+    """Render squat-specific UI elements with evidence-based metrics."""
+    jp = m["joints_px"]
+    
+    # Draw knee angle arc
+    draw_angle_with_arc(frame, jp["hip"], jp["knee"], jp["ankle"],
+                        angle_deg=knee, color=m["depth_color"], show_text=True)
+    
+    # Draw torso line (shoulder-hip) in torso lean color
+    cv2.line(frame, jp["shoulder"], jp["hip"], m["torso_lean_color"], 3)
+    
+    # Draw shin line (tibia) in tibia angle color
+    cv2.line(frame, jp["ankle"], jp["knee"], m["tibia_angle_color"], 2)
+    
+    # HUD - Primary metrics (evidence-based)
+    y_offset = 30
+    put(frame, f"[SQUAT] Reps: {reps} | Phase: {phase.upper()}", y_offset, (0, 255, 255))
+    y_offset += 30
+    put(frame, f"Depth: {int(knee)}° ({m['depth_zone']})", y_offset, m["depth_color"])
+    y_offset += 30
+    put(frame, f"Torso Lean: {int(m['torso_lean_deg'])}° ({m['torso_lean_zone']})", 
+        y_offset, m["torso_lean_color"])
+    y_offset += 30
+    put(frame, f"Trunk-Tibia: {int(m['trunk_tibia_diff'])}° ({m['trunk_tibia_zone']})", 
+        y_offset, m["trunk_tibia_color"])
+    y_offset += 30
+    put(frame, f"Tibia Angle: {int(m['tibia_angle_deg'])}° ({m['tibia_angle_zone']})", 
+        y_offset, m["tibia_angle_color"])
+    y_offset += 30
+    put(frame, f"Symmetry: {m['depth_symmetry_deg']:.1f}° ({m['depth_symmetry_zone']})", 
+        y_offset, m["depth_symmetry_color"])
+    y_offset += 30
+    if lumbar_excursion_deg is not None:
+        lumbar_color = (0, 255, 0) if lumbar_excursion_deg <= 15.0 else (
+            (0, 165, 255) if lumbar_excursion_deg <= 20.0 else (0, 0, 255))
+        put(frame, f"Lumbar Excursion: {lumbar_excursion_deg:.1f}°", 
+            y_offset, lumbar_color)
+        y_offset += 30
+    put(frame, " | ".join(cues) if cues else "✓ Good form!", y_offset,
+        (0, 0, 255) if cues else (0, 255, 0), scale=0.65)
+
+def render_wallsit(frame, m, seconds, cues):
+    """Render wall-sit specific UI elements with evidence-based metrics."""
+    jp = m["joints_px"]
+    
+    # Draw knee angle arc
+    draw_angle_with_arc(frame, jp["hip"], jp["knee"], jp["ankle"],
+                        angle_deg=m["knee_angle"], color=m["knee_color"], show_text=True)
+    # Torso line (back alignment)
+    cv2.line(frame, jp["shoulder"], jp["hip"], m["back_color"], 3)
+    # Draw line from ankle to knee to visualize knee-over-toe
+    if "heel" in jp and "toe" in jp:
+        cv2.line(frame, jp["ankle"], jp["knee"], m["knee_over_toe_color"], 2)
+    
+    # HUD - Evidence-based metrics
+    y_offset = 30
+    put(frame, f"[WALL-SIT] Hold: {seconds:.1f}s", y_offset, (0, 255, 255))
+    y_offset += 30
+    put(frame, f"Knee Angle: {int(m['knee_angle'])}° ({m['knee_zone']})", y_offset, m["knee_color"])
+    y_offset += 30
+    put(frame, f"Back Alignment: {int(m['torso_vertical_deg'])}° ({m['back_zone']})",
+        y_offset, m["back_color"])
+    y_offset += 30
+    if m["knee_over_toe_norm"] is not None:
+        put(frame, f"Knee Over Toe: {m['knee_over_toe_norm']*100:.1f}% ({m['knee_over_toe_zone']})",
+            y_offset, m["knee_over_toe_color"])
+        y_offset += 30
+    put(frame, " | ".join(cues) if cues else "✓ Solid hold!", y_offset,
+        (0, 0, 255) if cues else (0, 255, 0), scale=0.65)
+
+def render_curl(frame, m, elbow, reps, phase, cues, side):
+    """Render curl-specific UI elements with evidence-based metrics."""
+    jp = m["joints_px"]
+    
+    # Draw elbow angle arc (contraction)
+    draw_angle_with_arc(frame, jp["shoulder"], jp["elbow"], jp["wrist"],
+                        angle_deg=elbow, color=m["elbow_color"], show_text=True)
+    
+    # Upper arm line (colored by vertical alignment zone)
+    cv2.line(frame, jp["shoulder"], jp["elbow"], m["upper_arm_color"], 3)
+    
+    # HUD - Evidence-based metrics
+    y_offset = 30
+    put(frame, f"[CURL - {side}] Reps: {reps} | Phase: {phase.upper()}", y_offset, (0, 255, 255))
+    y_offset += 30
+    put(frame, f"Elbow Angle: {int(elbow)}° ({m['elbow_zone']})", y_offset, m["elbow_color"])
+    y_offset += 30
+    put(frame, f"Upper Arm Alignment: {int(m['upper_arm_vertical_deg'])}° ({m['upper_arm_zone']})",
+        y_offset, m["upper_arm_color"])
+    y_offset += 30
+    put(frame, " | ".join(cues) if cues else "✓ Clean rep!",
+        y_offset, (0, 0, 255) if cues else (0, 255, 0), scale=0.65)
+
+def get_squat_cues(m, lumbar_excursion_deg=None):
+    """Extract cues for squat form feedback using evidence-based metrics."""
+    cues = []
+    # Depth
+    if m["depth_zone"] in ("acceptable", "poor"):
+        cues.append("Go deeper")
+    # Torso lean
+    if m["torso_lean_zone"] in ("acceptable", "poor"):
+        cues.append("Stay more upright")
+    # Trunk-tibia harmony
+    if m["trunk_tibia_zone"] in ("acceptable", "poor"):
+        cues.append("Align torso with shins")
+    # Tibia angle (knee travel)
+    if m["tibia_angle_zone"] in ("acceptable", "poor"):
+        cues.append("Ankle mobility / knees back")
+    # Depth symmetry
+    if m["depth_symmetry_zone"] in ("acceptable", "poor"):
+        cues.append("Even depth L/R")
+    # Lumbar excursion
+    if lumbar_excursion_deg is not None and lumbar_excursion_deg > 15.0:
+        cues.append("Keep chest up / brace")
+    # Back straightness
+    if m["back_zone"] in ("acceptable", "poor"):
+        cues.append("Keep back straight")
+    return cues
+
+def get_wallsit_cues(m):
+    """Extract cues for wall-sit form feedback using evidence-based metrics."""
+    cues = []
+    # Knee angle
+    if m["knee_zone"] in ("acceptable", "poor"):
+        cues.append("Aim for 90° at knee")
+    # Back alignment
+    if m["back_zone"] in ("acceptable", "poor"):
+        cues.append("Back flat against wall")
+    # Knee over toe
+    if m.get("knee_over_toe_norm") is not None and m["knee_over_toe_zone"] in ("acceptable", "poor"):
+        cues.append("Knees over ankles")
+    return cues
+
+def get_curl_cues(m):
+    """Extract cues for curl form feedback using evidence-based metrics."""
+    cues = []
+    # Elbow contraction
+    if m["elbow_zone"] in ("acceptable", "poor"):
+        cues.append("Squeeze at top / Full contraction")
+    # Upper arm stability (prevents cheating/swinging)
+    if m["upper_arm_zone"] in ("acceptable", "poor"):
+        cues.append("Keep upper arm still")
+    return cues
+
 def main():
+    """Main application loop."""
+    # Initialize camera with error handling
     cap = cv2.VideoCapture(CAM_INDEX)
+    if not cap.isOpened():
+        print(f"Error: Could not open camera {CAM_INDEX}")
+        print("Please check that your camera is connected and not being used by another application.")
+        return
+    
+    # Set camera properties
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
     cap.set(cv2.CAP_PROP_FPS, FPS)
+    
+    # Verify camera works
+    ret, frame = cap.read()
+    if not ret:
+        print("Error: Could not read from camera")
+        cap.release()
+        return
+    
+    # Report actual camera resolution
+    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"Camera initialized: {actual_w}x{actual_h}")
 
     exercise = "squat"   # "squat" | "wallsit" | "curl"
+    curl_side = "LEFT"   # "LEFT" | "RIGHT"
+    exercise_switch_time = None
+    switch_message_duration = 2.0  # seconds
 
     # Smoothers for displayed angles
     ema_knee, med_knee   = EMA(0.25), MedianFilter(5)
@@ -70,150 +253,162 @@ def main():
 
     # Hold timer for wall-sit
     hold_timer = HoldTimer()
+    
+    # Lumbar excursion tracker for squats
+    lumbar_tracker = LumbarExcursionTracker()
+    
+    # FPS limiting
+    last_frame_time = time.time()
+    frame_time_target = 1.0 / FPS
 
-    with mp_pose.Pose(
-        model_complexity=MODEL_COMPLEXITY,
-        smooth_landmarks=True,
-        enable_segmentation=False,
-        min_detection_confidence=MIN_DET_CONF,
-        min_tracking_confidence=MIN_TRK_CONF
-    ) as pose:
+    try:
+        with mp_pose.Pose(
+            model_complexity=MODEL_COMPLEXITY,
+            smooth_landmarks=True,
+            enable_segmentation=False,
+            min_detection_confidence=MIN_DET_CONF,
+            min_tracking_confidence=MIN_TRK_CONF
+        ) as pose:
 
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
+            while True:
+                # FPS limiting
+                current_time = time.time()
+                elapsed = current_time - last_frame_time
+                if elapsed < frame_time_target:
+                    time.sleep(frame_time_target - elapsed)
+                last_frame_time = time.time()
+                
+                ok, frame = cap.read()
+                if not ok:
+                    print("Warning: Failed to read frame from camera")
+                    break
 
-            h, w = frame.shape[:2]
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            res = pose.process(rgb)
+                h, w = frame.shape[:2]
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                res = pose.process(rgb)
 
-            # Draw landmarks (nice official style)
-            if res.pose_landmarks:
-                mp_draw.draw_landmarks(
-                    frame,
-                    res.pose_landmarks,
-                    mp_pose.POSE_CONNECTIONS,
-                    landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style()
-                )
+                # Draw landmarks (nice official style)
+                if res.pose_landmarks:
+                    mp_draw.draw_landmarks(
+                        frame,
+                        res.pose_landmarks,
+                        mp_pose.POSE_CONNECTIONS,
+                        landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style()
+                    )
 
-            # MediaPipe normalized landmarks list
-            lm = res.pose_landmarks.landmark if res.pose_landmarks else None
-            if lm:
-                if exercise == "squat":
-                    m = squat_metrics(lm, w, h, mp_pose)
-                    if m:
-                        # Angle smoothing for display
-                        knee = ema_knee(med_knee(m["knee_angle"]))
+                # MediaPipe normalized landmarks list
+                lm = res.pose_landmarks.landmark if res.pose_landmarks else None
+                if lm:
+                    if exercise == "squat":
+                        m = squat_metrics(lm, w, h, mp_pose)
+                        if m:
+                            # Angle smoothing for display
+                            knee = ema_knee(med_knee(m["knee_angle"]))
+                            
+                            # Rep count on knee angle
+                            reps, phase = squat_counter.update(knee)
+                            
+                            # Track lumbar excursion
+                            if phase == "down" and not lumbar_tracker.rep_active:
+                                lumbar_tracker.start_rep(m["torso_lean_deg"])
+                            lumbar_tracker.update(m["torso_lean_deg"], phase)
+                            lumbar_excursion = lumbar_tracker.get_excursion()
+                            
+                            # Get cues
+                            cues = get_squat_cues(m, lumbar_excursion)
+                            
+                            # Render
+                            render_squat(frame, m, knee, reps, phase, cues, lumbar_excursion)
 
-                        # Rep count on knee angle
-                        reps, phase = squat_counter.update(knee)
+                    elif exercise == "wallsit":
+                        m = wallsit_metrics(lm, w, h, mp_pose)
+                        if m:
+                            seconds = hold_timer.update(m["knee_90"] and m["back_vertical"])
+                            
+                            # Get cues
+                            cues = get_wallsit_cues(m)
+                            
+                            # Render
+                            render_wallsit(frame, m, seconds, cues)
 
-                        # Draw knee angle arc
-                        jp = m["joints_px"]
-                        draw_angle_with_arc(frame, jp["hip"], jp["knee"], jp["ankle"],
-                                            angle_deg=knee, color=m["depth_color"], show_text=True)
+                    elif exercise == "curl":
+                        m = curl_metrics(lm, w, h, mp_pose, side=curl_side)
+                        if m:
+                            elbow = ema_elbow(med_elbow(m["elbow_angle"]))
+                            reps, phase = curl_counter.update(elbow)
+                            
+                            # Get cues
+                            cues = get_curl_cues(m)
+                            
+                            # Render
+                            render_curl(frame, m, elbow, reps, phase, cues, curl_side)
 
-                        # Draw torso line (shoulder-hip) in back-zone color
-                        cv2.line(frame, jp["shoulder"], jp["hip"], m["back_color"], 3)
+                # Draw legend and controls
+                draw_legend(frame)
+                put(frame, "Keys: [1]=Squat  [2]=Wall-sit  [3]=Curl  [R]=Reset  [L]=Left  [Q]=Right  [ESC]=Quit",
+                    frame.shape[0] - 10, (255, 255, 255), 0.6, 1)
+                
+                # Show exercise switch message
+                if exercise_switch_time:
+                    elapsed_switch = time.time() - exercise_switch_time
+                    if elapsed_switch < switch_message_duration:
+                        put(frame, f"Switched to: {exercise.upper()}", 210, (255, 255, 0), scale=0.8)
+                    else:
+                        exercise_switch_time = None
 
-                        # Optional: draw shin line in hinge color (helps visualize)
-                        cv2.line(frame, jp["ankle"], jp["knee"], m["hinge_color"], 2)
+                cv2.imshow("AI Physio (Webcam)", frame)
+                k = cv2.waitKey(1) & 0xFF
+                if k == 27:  # ESC
+                    break
+                elif k == ord('1'):
+                    exercise = "squat"
+                    exercise_switch_time = time.time()
+                    # Reset counters and smoothers
+                    squat_counter = RepCounter(low_thresh=SQUAT_BOTTOM_DEG, high_thresh=SQUAT_TOP_DEG)
+                    ema_knee, med_knee = EMA(0.25), MedianFilter(5)
+                    lumbar_tracker.reset()
+                elif k == ord('2'):
+                    exercise = "wallsit"
+                    exercise_switch_time = time.time()
+                    # Reset timer
+                    hold_timer = HoldTimer()
+                elif k == ord('3'):
+                    exercise = "curl"
+                    exercise_switch_time = time.time()
+                    # Reset counters and smoothers
+                    curl_counter = RepCounter(low_thresh=CURL_BOTTOM_DEG, high_thresh=CURL_TOP_DEG)
+                    ema_elbow, med_elbow = EMA(0.25), MedianFilter(5)
+                elif k == ord('r') or k == ord('R'):
+                    # Manual reset for current exercise
+                    if exercise == "squat":
+                        squat_counter.reset()
+                        ema_knee, med_knee = EMA(0.25), MedianFilter(5)
+                    elif exercise == "curl":
+                        curl_counter.reset()
+                        ema_elbow, med_elbow = EMA(0.25), MedianFilter(5)
+                    elif exercise == "wallsit":
+                        hold_timer = HoldTimer()
+                elif k == ord('l') or k == ord('L'):
+                    # Switch curl to left side
+                    if exercise == "curl":
+                        curl_side = "LEFT"
+                        curl_counter.reset()  # Reset when switching sides
+                elif k == ord('q') or k == ord('Q'):
+                    # Switch curl to right side (q for Right to avoid conflict with Reset)
+                    if exercise == "curl":
+                        curl_side = "RIGHT"
+                        curl_counter.reset()  # Reset when switching sides
 
-                        # Cues
-                        cues = []
-                        if m["depth_zone"] in ("acceptable", "poor"):
-                            cues.append("Go deeper")
-                        if m["back_zone"] in ("acceptable", "poor"):
-                            cues.append("Chest up")
-                        if m["hinge_zone"] in ("acceptable", "poor"):
-                            cues.append("Brace core")
-                        if m["knee_forward_norm"] is not None and m["knee_toe_zone"] in ("acceptable", "poor"):
-                            cues.append("Knees back")
-
-                        # HUD
-                        put(frame, f"[SQUAT] Reps: {reps} | Phase: {phase.upper()}", 30, (0, 255, 255))
-                        put(frame, f"Knee: {int(knee)}° ({m['depth_zone']})", 60, m["depth_color"])
-                        put(frame, f"Torso->Vertical: {int(m['torso_vertical_deg'])}° ({m['back_zone']})", 90, m["back_color"])
-                        put(frame, f"Hinge: {int(m['hinge_deg'])}° ({m['hinge_zone']})", 120, m["hinge_color"])
-                        if m["knee_forward_norm"] is not None:
-                            put(frame, f"Knee over toe: {m['knee_forward_norm']:.3f} ({m['knee_toe_zone']})",
-                                150, m["knee_toe_color"])
-                        put(frame, " | ".join(cues) if cues else "✓ Good form!", 180,
-                            (0, 0, 255) if cues else (0, 255, 0), scale=0.65)
-
-                elif exercise == "wallsit":
-                    m = wallsit_metrics(lm, w, h, mp_pose)
-                    if m:
-                        seconds = hold_timer.update(m["knee_90"] and m["back_vertical"])
-
-                        # Draw knee angle arc
-                        jp = m["joints_px"]
-                        draw_angle_with_arc(frame, jp["hip"], jp["knee"], jp["ankle"],
-                                            angle_deg=m["knee_angle"], color=m["knee_color"], show_text=True)
-                        # Torso line
-                        cv2.line(frame, jp["shoulder"], jp["hip"], m["back_color"], 3)
-
-                        cues = []
-                        if m["knee_zone"] in ("acceptable", "poor"):
-                            cues.append("Aim for 90° at knee")
-                        if m["back_zone"] in ("acceptable", "poor"):
-                            cues.append("Back against wall")
-
-                        put(frame, f"[WALL-SIT] Hold: {seconds:.1f}s", 30, (0, 255, 255))
-                        put(frame, f"Knee: {int(m['knee_angle'])}° ({m['knee_zone']})", 60, m["knee_color"])
-                        put(frame, f"Torso->Vertical: {int(m['torso_vertical_deg'])}° ({m['back_zone']})",
-                            90, m["back_color"])
-                        put(frame, " | ".join(cues) if cues else "✓ Solid hold!", 120,
-                            (0, 0, 255) if cues else (0, 255, 0), scale=0.65)
-
-                elif exercise == "curl":
-                    # Auto-pick a side yourself if you’d like; here we show LEFT by default.
-                    m = curl_metrics(lm, w, h, mp_pose, side="LEFT")
-                    if m:
-                        elbow = ema_elbow(med_elbow(m["elbow_angle"]))
-                        reps, phase = curl_counter.update(elbow)
-
-                        jp = m["joints_px"]
-                        draw_angle_with_arc(frame, jp["shoulder"], jp["elbow"], jp["wrist"],
-                                            angle_deg=elbow, color=m["contraction_color"], show_text=True)
-
-                        # Upper arm line (green if stable)
-                        ua_col = (0, 255, 0) if m["upper_arm_stable"] else (0, 0, 255)
-                        cv2.line(frame, jp["shoulder"], jp["elbow"], ua_col, 3)
-
-                        cues = []
-                        if m["contraction_zone"] in ("acceptable", "poor"):
-                            cues.append("Squeeze at top")
-                        if not m["upper_arm_stable"]:
-                            cues.append("Keep upper arm still")
-
-                        put(frame, f"[CURL] Reps: {reps} | Phase: {phase.upper()}", 30, (0, 255, 255))
-                        put(frame, f"Elbow: {int(elbow)}° ({m['contraction_zone']})", 60, m["contraction_color"])
-                        put(frame, f"Upper arm->Vertical: {int(m['upper_arm_vertical_deg'])}°",
-                            90, ua_col)
-                        put(frame, " | ".join(cues) if cues else "✓ Clean rep!",
-                            120, (0, 0, 255) if cues else (0, 255, 0), scale=0.65)
-
-            draw_legend(frame)
-            put(frame, "Keys: [1]=Squat  [2]=Wall-sit  [3]=Curl   [ESC]=Quit",
-                frame.shape[0] - 10, (255, 255, 255), 0.6, 1)
-
-            cv2.imshow("AI Physio (Webcam)", frame)
-            k = cv2.waitKey(1) & 0xFF
-            if k == 27:
-                break
-            elif k == ord('1'):
-                exercise = "squat"
-                # reset counters/smoothers if you want a clean start
-            elif k == ord('2'):
-                exercise = "wallsit"
-                hold_timer.update(False)
-            elif k == ord('3'):
-                exercise = "curl"
-
-    cap.release()
-    cv2.destroyAllWindows()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+    except Exception as e:
+        print(f"Error during execution: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        print("Camera released. Goodbye!")
 
 if __name__ == "__main__":
     main()

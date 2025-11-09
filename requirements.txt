@@ -3,6 +3,4 @@ mediapipe>=0.10.0
 numpy>=1.24.0
 
 # NOTE: MediaPipe requires Python 3.8-3.11
-# If you're using Python 3.12 or 3.13, you need to use Python 3.11 or lower
-# To install Python 3.11: https://www.python.org/downloads/
 # Then create a virtual environment: python3.11 -m venv .venv

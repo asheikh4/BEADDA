@@ -1,6 +1,7 @@
 # src/CV/pose_utils.py
 # Generic utilities: geometry, smoothing, timers, and drawing helpers.
 
+from typing import Tuple, Optional, Any
 import numpy as np
 import cv2
 import time
@@ -8,7 +9,8 @@ import math
 
 # ---------------- Geometry ----------------
 
-def angle_3pt(a, b, c):
+def angle_3pt(a: Tuple[float, float], b: Tuple[float, float], 
+              c: Tuple[float, float]) -> float:
     """
     Angle ABC in degrees using 2D pixel coordinates.
     a, b, c = (x, y) pixels; b is the vertex.
@@ -23,15 +25,19 @@ def angle_3pt(a, b, c):
     cosang = float(np.clip(cosang, -1.0, 1.0))
     return float(np.degrees(np.arccos(cosang)))
 
-def to_xy(lm, idx, w, h):
+def to_xy(lm: Any, idx: int, w: int, h: int) -> Tuple[int, int]:
     """
     Convert MediaPipe normalized landmark at index idx to pixel (x, y).
     If landmark list is missing or index invalid, returns (0, 0).
     """
     try:
+        if lm is None or idx < 0 or idx >= len(lm):
+            return 0, 0
         p = lm[idx]
+        if not hasattr(p, 'x') or not hasattr(p, 'y'):
+            return 0, 0
         return int(p.x * w), int(p.y * h)
-    except Exception:
+    except (IndexError, AttributeError, TypeError):
         return 0, 0
 
 # ---------------- Smoothing & timing ----------------
@@ -63,8 +69,9 @@ class HoldTimer:
     Simple hold timer. Call update(cond) every frame; returns seconds while cond True,
     otherwise resets and returns 0.0
     """
-    def __init__(self):
-        self.t0 = None
+    def __init__(self) -> None:
+        self.t0: Optional[float] = None
+    
     def update(self, cond: bool) -> float:
         if cond:
             if self.t0 is None:
@@ -75,10 +82,20 @@ class HoldTimer:
 
 # ---------------- Drawing helpers ----------------
 
-def put(img, txt, y, col=(255, 255, 255), scale=0.7, thick=2, x=10):
+def put(img: np.ndarray, txt: str, y: int, col: Tuple[int, int, int] = (255, 255, 255), 
+        scale: float = 0.7, thick: int = 2, x: int = 10) -> None:
+    """Draw text on image with bounds checking."""
+    if img is None or img.size == 0:
+        return
+    h, w = img.shape[:2]
+    if y < 0 or y > h or x < 0 or x > w:
+        return  # Skip drawing if out of bounds
     cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, col, thick, cv2.LINE_AA)
 
-def draw_angle_with_arc(img, a, b, c, angle_deg=None, color=(0, 255, 0), show_text=True):
+def draw_angle_with_arc(img: np.ndarray, a: Tuple[int, int], b: Tuple[int, int], 
+                        c: Tuple[int, int], angle_deg: Optional[float] = None, 
+                        color: Tuple[int, int, int] = (0, 255, 0), 
+                        show_text: bool = True) -> None:
     """
     Draw the angle at vertex b for pixel points a, b, c.
     If angle_deg is None we compute it via angle_3pt.
