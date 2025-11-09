@@ -2,10 +2,14 @@ from pylsl import StreamInlet, resolve_byprop
 import numpy as np
 import time
 
-from flask import Flask, render_template
+from flask import Flask, render_template, Response
 from flask_socketio import SocketIO
 import time
 import threading
+
+# CAMERA SETUP
+import cv2
+camera=cv2.VideoCapture(0)
 
 # SETTING UP FLASK STUFF
 
@@ -21,7 +25,31 @@ is_collecting_data = False
 def index():
     return render_template('index.html')
 
+# WEBCAM DISPLAY
+@app.route('/video')
+def video():
+    return Response(generate_frames(),mimetype='multipart/x-mixed-replace; boundary=frame')
 
+# FRAMES FOR CAMERA
+def generate_frames():
+    while True:
+            
+        ## read the camera frame
+        success,frame=camera.read()
+        if not success:
+            break
+        else:
+            ret,buffer=cv2.imencode('.jpg',frame)
+            frame=buffer.tobytes()
+
+        yield(b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+
+
+
+
+# TEST COUNTER
 def counter_thread():
     count = 0
     while True:
