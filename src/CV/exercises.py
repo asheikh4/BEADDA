@@ -324,6 +324,68 @@ class RepCounter:
             self.reps += 1
         return self.reps, self.state
 
+class FormAwareRepCounter:
+    """
+    Rep counter that only counts reps when all form metrics are in good/acceptable zones.
+    Tracks angle-based rep phases AND form quality throughout the rep.
+    Only counts a rep if form is acceptable when reaching the bottom (full contraction).
+    """
+    def __init__(self, low_thresh, high_thresh):
+        self.low, self.high = float(low_thresh), float(high_thresh)
+        self.state, self.reps = "top", 0
+        self.form_good_at_bottom = False  # Track if form was good when reaching bottom
+    
+    def reset(self):
+        """Reset the counter to initial state."""
+        self.state, self.reps = "top", 0
+        self.form_good_at_bottom = False
+    
+    def update(self, angle, zones=None):
+        """
+        Update rep counter with angle and optional zone information.
+        zones: dict of zone names to zone values (e.g., {"elbow_zone": "good", "upper_arm_zone": "acceptable"})
+        Only counts rep if all zones are "perfect", "good", or "acceptable" (not "poor") when reaching bottom.
+        """
+        a = float(angle)
+        
+        # Check if all form metrics are acceptable (not "poor")
+        form_acceptable = True
+        if zones:
+            for zone_name, zone_value in zones.items():
+                if zone_value == "poor":
+                    form_acceptable = False
+                    break
+        
+        # State machine for rep counting
+        if self.state == "top" and a < self.high:
+            self.state = "down"
+            # Reset form tracking when starting descent
+            self.form_good_at_bottom = form_acceptable
+        elif self.state == "down":
+            if a < self.low:
+                self.state = "bottom"
+                # Update form status when reaching bottom - must be acceptable here
+                self.form_good_at_bottom = form_acceptable
+            elif a >= self.high:  # Allow recovery back to top without counting
+                self.state = "top"
+                self.form_good_at_bottom = False
+        elif self.state == "bottom":
+            # Continue tracking form while at bottom
+            if form_acceptable:
+                # Keep form_good_at_bottom True if form is acceptable
+                pass  # Already set when reaching bottom
+            else:
+                # If form becomes poor while at bottom, mark as not acceptable
+                self.form_good_at_bottom = False
+            if a > self.high:
+                self.state = "top"
+                # Only count rep if form was acceptable at bottom
+                if self.form_good_at_bottom:
+                    self.reps += 1
+                self.form_good_at_bottom = False
+        
+        return self.reps, self.state
+
 
 # ----------------------------- Metrics -----------------------------
 

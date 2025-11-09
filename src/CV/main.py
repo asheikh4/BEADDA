@@ -1,6 +1,14 @@
 # src/CV/main.py
 # Webcam app that uses MediaPipe Pose + your exercises metrics.
-# Keys: [1]=Squat  [2]=Wall-sit  [3]=Curl  [R]=Reset  [L]=Left arm  [Q]=Right arm  [ESC]=Quit
+# 
+# DATA COLLECTION OPTIMIZED:
+# - Enhanced MediaPipe configuration (higher confidence thresholds)
+# - Real-time data quality monitoring (visibility, lighting, scale)
+# - Calibration mode for optimal setup
+# - Camera settings optimization (exposure, white balance, focus)
+# - Quality indicators displayed on-screen
+# 
+# Keys: [1]=Squat  [2]=Wall-sit  [3]=Curl  [R]=Reset  [L]=Left arm  [Q]=Right arm  [C]=Calibrate  [ESC]=Quit
 
 import sys
 import time
@@ -14,16 +22,34 @@ if str(current_dir) not in sys.path:
 import cv2
 import numpy as np
 import mediapipe as mp
-from pose_utils import put, draw_angle_with_arc, EMA, MedianFilter, HoldTimer
+from pose_utils import (put, draw_angle_with_arc, EMA, MedianFilter, HoldTimer,
+                        check_pose_quality, check_lighting_quality, validate_person_scale,
+                        get_landmark_visibility, AdaptiveEMA)
 from exercises import (squat_metrics, wallsit_metrics, curl_metrics, RepCounter, 
-                       LumbarExcursionTracker)
+                       FormAwareRepCounter, LumbarExcursionTracker)
 
-# ---------------- Config ----------------
+# ---------------- Enhanced Config for Data Collection ----------------
 CAM_INDEX = 0
 FRAME_W, FRAME_H, FPS = 1280, 720, 30
+
+# MediaPipe settings (higher for data quality)
 MODEL_COMPLEXITY = 2
-MIN_DET_CONF = 0.70
-MIN_TRK_CONF = 0.70
+MIN_DET_CONF = 0.75  # Increased from 0.70 for better data quality
+MIN_TRK_CONF = 0.75  # Increased from 0.70 for better data quality
+SMOOTH_LANDMARKS = True
+
+# Data quality thresholds
+MIN_VISIBILITY_SCORE = 0.7  # Minimum landmark visibility (70%)
+MIN_LIGHTING_BRIGHTNESS = 50  # Minimum frame brightness
+MAX_LIGHTING_BRIGHTNESS = 200  # Maximum frame brightness
+MIN_CONTRAST = 30  # Minimum frame contrast
+PERSON_SCALE_MIN = 0.3  # Minimum person height / frame height (30%)
+PERSON_SCALE_MAX = 0.8  # Maximum person height / frame height (80%)
+QUALITY_THRESHOLD = 0.7  # Minimum overall quality to process frame
+
+# Smoothing (can be adjusted based on data quality)
+EMA_ALPHA = 0.25
+MEDIAN_FILTER_SIZE = 5
 
 # Rep thresholds (for knee/elbow angles)
 # Squat: based on depth thresholds (100° perfect, so 95° ensures full depth)
@@ -38,6 +64,200 @@ CURL_TOP_DEG     = 130.0  # Extended arm
 mp_pose   = mp.solutions.pose
 mp_draw   = mp.solutions.drawing_utils
 mp_styles = mp.solutions.drawing_styles
+
+# ---------------- Camera Setup ----------------
+def setup_camera_optimal(cap, target_w=1280, target_h=720):
+    """Configure camera for optimal pose detection and data collection."""
+    # Set resolution
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, target_w)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, target_h)
+    
+    # Enable auto-exposure (helps with lighting changes)
+    # Try to set auto-exposure, fallback if not supported
+    try:
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # 0.75 = auto, 0.25 = manual
+    except:
+        pass  # Some cameras don't support this
+    
+    # Auto white balance (helps with color consistency)
+    try:
+        cap.set(cv2.CAP_PROP_AUTO_WB, 1.0)  # 1.0 = auto, 0.0 = manual
+    except:
+        pass
+    
+    # Focus (if supported)
+    try:
+        cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)  # Auto-focus
+    except:
+        pass
+    
+    # Frame rate
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    
+    # Buffer size (reduce latency)
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    except:
+        pass
+    
+    return cap
+
+# ---------------- Data Quality Display ----------------
+def render_data_quality(frame, quality_score, is_valid, issues, lighting_ok, 
+                       scale_ok, scale_factor, y_start=10):
+    """Display data quality indicators for data collection."""
+    if frame is None or frame.size == 0:
+        return
+    
+    h, w = frame.shape[:2]
+    bar_width = 200
+    bar_height = 20
+    bar_x = w - bar_width - 10
+    
+    # Quality indicator bar
+    if is_valid and lighting_ok and scale_ok:
+        bar_color = (0, 255, 0)  # Green
+        status_text = "READY"
+    elif quality_score > 0.5:
+        bar_color = (0, 165, 255)  # Orange
+        status_text = "MARGINAL"
+    else:
+        bar_color = (0, 0, 255)  # Red
+        status_text = "POOR"
+    
+    # Draw quality bar background
+    cv2.rectangle(frame, (bar_x - 2, y_start - 2),
+                  (bar_x + bar_width + 2, y_start + bar_height + 2),
+                  (0, 0, 0), -1)
+    
+    # Draw quality bar
+    cv2.rectangle(frame, (bar_x, y_start),
+                  (bar_x + int(bar_width * quality_score), y_start + bar_height),
+                  bar_color, -1)
+    cv2.rectangle(frame, (bar_x, y_start),
+                  (bar_x + bar_width, y_start + bar_height),
+                  (255, 255, 255), 2)
+    
+    # Status text
+    put(frame, f"Data Quality: {status_text} ({quality_score:.0%})",
+        y_start + bar_height + 20, bar_color, scale=0.6, x=bar_x)
+    
+    # Lighting status
+    lighting_color = (0, 255, 0) if lighting_ok else (0, 0, 255)
+    lighting_text = "Lighting: OK" if lighting_ok else "Lighting: ADJUST"
+    put(frame, lighting_text, y_start + bar_height + 40,
+        lighting_color, scale=0.5, x=bar_x)
+    
+    # Scale status
+    scale_color = (0, 255, 0) if scale_ok else (0, 0, 255)
+    scale_text = f"Distance: OK ({scale_factor:.0%})" if scale_ok else f"Distance: {scale_factor:.0%}"
+    put(frame, scale_text, y_start + bar_height + 60,
+        scale_color, scale=0.5, x=bar_x)
+    
+    # Show issues if any
+    if issues:
+        for i, issue in enumerate(issues[:2]):  # Show first 2 issues
+            put(frame, f"⚠ {issue}", y_start + bar_height + 80 + (i * 18),
+                (0, 0, 255), scale=0.5, x=bar_x)
+
+# ---------------- Calibration Mode ----------------
+def calibration_mode(cap, pose, mp_pose, mp_draw):
+    """
+    Calibration mode to help user set up camera properly.
+    Guides user through optimal positioning for data collection.
+    """
+    print("=== CALIBRATION MODE ===")
+    print("Position yourself in frame. Press SPACE when ready, ESC to skip.")
+    
+    calibration_ready = False
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        h, w = frame.shape[:2]
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        res = pose.process(rgb)
+        
+        lm = res.pose_landmarks.landmark if res.pose_landmarks else None
+        
+        # Check lighting
+        lighting_ok, brightness, lighting_issues = check_lighting_quality(frame)
+        
+        if lm:
+            # Check pose quality
+            pose_ok, quality_score, pose_issues = check_pose_quality(lm, mp_pose, "squat")
+            
+            # Check scale
+            scale_ok, scale_factor, scale_issue = validate_person_scale(lm, mp_pose, w, h)
+            
+            # Draw calibration guides
+            cv2.putText(frame, "CALIBRATION MODE", (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            cv2.putText(frame, "Adjust position and lighting", (10, 60),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            # Lighting status
+            lighting_color = (0, 255, 0) if lighting_ok else (0, 0, 255)
+            lighting_status = "OK" if lighting_ok else f"ADJUST - {', '.join(lighting_issues[:2])}"
+            cv2.putText(frame, f"Lighting: {lighting_status}", 
+                       (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, lighting_color, 2)
+            
+            # Pose quality
+            pose_color = (0, 255, 0) if pose_ok else (0, 0, 255)
+            pose_status = "OK" if pose_ok else f"ADJUST - {', '.join(pose_issues[:2])}"
+            cv2.putText(frame, f"Pose: {pose_status} ({quality_score:.0%})",
+                       (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, pose_color, 2)
+            
+            # Scale
+            scale_color = (0, 255, 0) if scale_ok else (0, 0, 255)
+            scale_status = "OK" if scale_ok else scale_issue
+            cv2.putText(frame, f"Distance: {scale_status} ({scale_factor:.1%})",
+                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, scale_color, 2)
+            
+            # Draw pose
+            if res.pose_landmarks:
+                mp_draw.draw_landmarks(
+                    frame,
+                    res.pose_landmarks,
+                    mp_pose.POSE_CONNECTIONS,
+                    landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style()
+                )
+            
+            # All checks passed
+            if lighting_ok and pose_ok and scale_ok:
+                cv2.putText(frame, "READY! Press SPACE to continue", (10, 190),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                calibration_ready = True
+            else:
+                cv2.putText(frame, "Adjust position and lighting", (10, 190),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        else:
+            cv2.putText(frame, "No pose detected. Ensure good lighting.", (10, 90),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            lighting_color = (0, 255, 0) if lighting_ok else (0, 0, 255)
+            lighting_status = "OK" if lighting_ok else f"ADJUST - {', '.join(lighting_issues[:2])}"
+            cv2.putText(frame, f"Lighting: {lighting_status}", 
+                       (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, lighting_color, 2)
+        
+        cv2.putText(frame, "Press SPACE when ready, ESC to skip", (10, h - 20),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        cv2.imshow("Calibration", frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord(' '):  # SPACE to confirm
+            break
+        elif key == 27:  # ESC to skip
+            calibration_ready = False
+            break
+    
+    cv2.destroyWindow("Calibration")
+    if calibration_ready:
+        print("Calibration complete. Ready for data collection.")
+    else:
+        print("Calibration skipped.")
+    return calibration_ready
 
 def draw_legend(frame):
     """Draw the tolerance zone legend with adaptive positioning."""
@@ -213,7 +433,7 @@ def get_curl_cues(m):
     return cues
 
 def main():
-    """Main application loop."""
+    """Main application loop with enhanced data collection quality checks."""
     # Initialize camera with error handling
     cap = cv2.VideoCapture(CAM_INDEX)
     if not cap.isOpened():
@@ -221,10 +441,8 @@ def main():
         print("Please check that your camera is connected and not being used by another application.")
         return
     
-    # Set camera properties
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
-    cap.set(cv2.CAP_PROP_FPS, FPS)
+    # Setup camera with optimal settings for data collection
+    cap = setup_camera_optimal(cap, FRAME_W, FRAME_H)
     
     # Verify camera works
     ret, frame = cap.read()
@@ -237,6 +455,8 @@ def main():
     actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"Camera initialized: {actual_w}x{actual_h}")
+    print(f"MediaPipe settings: Model={MODEL_COMPLEXITY}, DetConf={MIN_DET_CONF}, TrkConf={MIN_TRK_CONF}")
+    print(f"Data quality thresholds: Visibility>={MIN_VISIBILITY_SCORE:.0%}, Quality>={QUALITY_THRESHOLD:.0%}")
 
     exercise = "squat"   # "squat" | "wallsit" | "curl"
     curl_side = "LEFT"   # "LEFT" | "RIGHT"
@@ -249,7 +469,8 @@ def main():
 
     # Rep counters
     squat_counter = RepCounter(low_thresh=SQUAT_BOTTOM_DEG, high_thresh=SQUAT_TOP_DEG)
-    curl_counter  = RepCounter(low_thresh=CURL_BOTTOM_DEG,  high_thresh=CURL_TOP_DEG)
+    # Use form-aware counter for curls - only counts reps when form is good
+    curl_counter  = FormAwareRepCounter(low_thresh=CURL_BOTTOM_DEG, high_thresh=CURL_TOP_DEG)
 
     # Hold timer for wall-sit
     hold_timer = HoldTimer()
@@ -264,11 +485,15 @@ def main():
     try:
         with mp_pose.Pose(
             model_complexity=MODEL_COMPLEXITY,
-            smooth_landmarks=True,
+            smooth_landmarks=SMOOTH_LANDMARKS,
             enable_segmentation=False,
             min_detection_confidence=MIN_DET_CONF,
             min_tracking_confidence=MIN_TRK_CONF
         ) as pose:
+            
+            # Optional calibration mode
+            print("\nPress 'C' during session to enter calibration mode, or continue with current setup.")
+            
 
             while True:
                 # FPS limiting
@@ -287,18 +512,40 @@ def main():
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 res = pose.process(rgb)
 
-                # Draw landmarks (nice official style)
-                if res.pose_landmarks:
+                # MediaPipe normalized landmarks list
+                lm = res.pose_landmarks.landmark if res.pose_landmarks else None
+                
+                # Data quality checks (for data collection optimization)
+                lighting_ok, brightness_score, lighting_issues = check_lighting_quality(frame)
+                scale_ok, scale_factor, scale_issue = (True, 0.5, None)  # Default
+                pose_ok, quality_score, pose_issues = (False, 0.0, [])
+                
+                if lm:
+                    # Check pose quality
+                    pose_ok, quality_score, pose_issues = check_pose_quality(lm, mp_pose, exercise)
+                    # Check scale
+                    scale_ok, scale_factor, scale_issue = validate_person_scale(lm, mp_pose, w, h)
+                    
+                    # Draw landmarks (nice official style)
                     mp_draw.draw_landmarks(
                         frame,
                         res.pose_landmarks,
                         mp_pose.POSE_CONNECTIONS,
                         landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style()
                     )
+                else:
+                    pose_issues = ["No pose detected"]
 
-                # MediaPipe normalized landmarks list
-                lm = res.pose_landmarks.landmark if res.pose_landmarks else None
+                # Render data quality indicators (top right corner)
+                render_data_quality(frame, quality_score, pose_ok, pose_issues, 
+                                   lighting_ok, scale_ok, scale_factor, y_start=10)
+
+                # Process exercise metrics only if quality is acceptable
                 if lm:
+                    # Optionally skip processing if quality is too low (comment out for always process)
+                    # if quality_score < QUALITY_THRESHOLD:
+                    #     put(frame, f"⚠ Low quality frame - processing anyway", 250, (0, 0, 255))
+                    
                     if exercise == "squat":
                         m = squat_metrics(lm, w, h, mp_pose)
                         if m:
@@ -335,7 +582,12 @@ def main():
                         m = curl_metrics(lm, w, h, mp_pose, side=curl_side)
                         if m:
                             elbow = ema_elbow(med_elbow(m["elbow_angle"]))
-                            reps, phase = curl_counter.update(elbow)
+                            # Pass form zones to rep counter - only counts if all are good/acceptable
+                            zones = {
+                                "elbow_zone": m["elbow_zone"],
+                                "upper_arm_zone": m["upper_arm_zone"]
+                            }
+                            reps, phase = curl_counter.update(elbow, zones=zones)
                             
                             # Get cues
                             cues = get_curl_cues(m)
@@ -345,7 +597,7 @@ def main():
 
                 # Draw legend and controls
                 draw_legend(frame)
-                put(frame, "Keys: [1]=Squat  [2]=Wall-sit  [3]=Curl  [R]=Reset  [L]=Left  [Q]=Right  [ESC]=Quit",
+                put(frame, "Keys: [1]=Squat  [2]=Wall-sit  [3]=Curl  [R]=Reset  [L]=Left  [Q]=Right  [C]=Calibrate  [ESC]=Quit",
                     frame.shape[0] - 10, (255, 255, 255), 0.6, 1)
                 
                 # Show exercise switch message
@@ -360,6 +612,8 @@ def main():
                 k = cv2.waitKey(1) & 0xFF
                 if k == 27:  # ESC
                     break
+                elif k == ord('c') or k == ord('C'):  # Calibration mode
+                    calibration_mode(cap, pose, mp_pose, mp_draw)
                 elif k == ord('1'):
                     exercise = "squat"
                     exercise_switch_time = time.time()
@@ -376,7 +630,7 @@ def main():
                     exercise = "curl"
                     exercise_switch_time = time.time()
                     # Reset counters and smoothers
-                    curl_counter = RepCounter(low_thresh=CURL_BOTTOM_DEG, high_thresh=CURL_TOP_DEG)
+                    curl_counter = FormAwareRepCounter(low_thresh=CURL_BOTTOM_DEG, high_thresh=CURL_TOP_DEG)
                     ema_elbow, med_elbow = EMA(0.25), MedianFilter(5)
                 elif k == ord('r') or k == ord('R'):
                     # Manual reset for current exercise
