@@ -334,23 +334,21 @@ def generate_frames():
                 if m:
                     knee = ema_knee(med_knee(m["knee_angle"]))
                     reps, phase = squat_counter.update(knee)
-                    
                     # Track lumbar excursion
                     if phase == "down" and not lumbar_tracker.rep_active:
                         lumbar_tracker.start_rep(m["torso_lean_deg"])
                     lumbar_tracker.update(m["torso_lean_deg"], phase)
                     lumbar_excursion = lumbar_tracker.get_excursion()
-                    
                     cues = get_squat_cues(m, lumbar_excursion)
                     render_squat(frame, m, knee, reps, phase, cues, lumbar_excursion)
-                    
+                    # print(int(reps))
+                    socketio.emit('rep_update', {'reps': reps})
             elif exercise == "wallsit":
                 m = wallsit_metrics(lm, w, h, mp_pose)
                 if m:
                     seconds = hold_timer.update(m["knee_90"] and m["back_vertical"])
                     cues = get_wallsit_cues(m)
                     render_wallsit(frame, m, seconds, cues)
-                    
             elif exercise == "curl":
                 m = curl_metrics(lm, w, h, mp_pose, side=curl_side)
                 if m:
@@ -362,6 +360,7 @@ def generate_frames():
                     reps, phase = curl_counter.update(elbow, zones=zones)
                     cues = get_curl_cues(m)
                     render_curl(frame, m, elbow, reps, phase, cues, curl_side)
+                    socketio.emit('rep_update', {'reps': reps})
         else:
             # No pose detected
             put(frame, "No pose detected. Position yourself in frame.", 30, (0, 0, 255))
@@ -389,7 +388,7 @@ def generate_frames():
 def counter_thread():
     count = 0
     while True:
-        # socketio.emit('counter_update', {'count': count})
+        socketio.emit('counter_update', {'count': count})
         count += 1
         time.sleep(1)  # Update every second
 
@@ -499,6 +498,12 @@ def handle_change_exercise(data):
 
 # MAIN
 if __name__ == '__main__':
+
+    # Start the background thread
+    thread = threading.Thread(target=counter_thread)
+    thread.daemon = True
+    thread.start()
+
     # Setup camera FIRST (before starting server)
     if not cap.isOpened():
         print(f"Error: Could not open camera {CAM_INDEX}")
@@ -513,6 +518,8 @@ if __name__ == '__main__':
     print(f"Camera initialized: {actual_w}x{actual_h}")
     print(f"Computer Vision: {exercise} mode")
     print(f"MediaPipe Pose Detection: Enabled")
+
+
     socketio.run(app, debug=True, port=8080, host='0.0.0.0')
     
     # # Try to initialize EMG stream (optional)
@@ -528,10 +535,7 @@ if __name__ == '__main__':
     #     print(f"EMG stream not available: {e}")
     #     print("Continuing without EMG functionality")
     
-    # # Start the background thread
-    # thread = threading.Thread(target=counter_thread)
-    # thread.daemon = True
-    # thread.start()
+ 
     
     # print(f"Starting web server on port 8080...")
     # print("Visit http://localhost:8080 to view the interface")
