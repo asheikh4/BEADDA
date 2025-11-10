@@ -46,10 +46,10 @@ app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, 
     cors_allowed_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
     async_mode='threading',
-    logger=True,
-    engineio_logger=True,
-    ping_timeout=60,
-    ping_interval=25,
+    logger=False,
+    engineio_logger=False,
+    # ping_timeout=60,
+    # ping_interval=25,
     allow_upgrades=True
 )
 
