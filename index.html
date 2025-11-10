@@ -100,11 +100,56 @@
           let workoutHtml = "";
           const workouts = data.workouts || [];
           workouts.forEach(w => {
+            // Generate HTML for sets
+            let setsHtml = '';
+            if (w.sets && w.sets.length > 0) {
+              w.sets.forEach((set, index) => {
+                const exerciseColor = {
+                  'Squat': 'text-yellow-600',
+                  'Wallsit': 'text-blue-600',
+                  'Curl': 'text-pink-600'
+                }[set.exercise] || 'text-purple-700';
+                
+                setsHtml += `
+                  <div class="ml-4 mt-2 p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center">
+                      <span class="font-semibold ${exerciseColor}">${set.exercise}</span>
+                      <span class="ml-4">Reps: ${set.reps}</span>
+                    </div>
+                    <div class="mt-2 text-sm grid grid-cols-2 gap-2">
+                      <div class="text-green-700">
+                        Max Muscle Exertion: ${set.max_muscle_exertion.toFixed(2)} µV
+                      </div>
+                      <div class="text-blue-700">
+                        Max Neural Exertion: ${set.max_neural_exertion.toFixed(2)} µV
+                      </div>
+                    </div>
+                  </div>
+                `;
+              });
+            }
+
             workoutHtml += `
-              <div class="border-b border-gray-200 py-2 mt-3">
-                <p class="font-medium text-gray-700">${w.date || ''}</p>
-                <p class="text-gray-600">Recommendation: ${w.recommendation || ''}</p>
-                <p class="text-gray-500">Notes: ${w.notes || ''}</p>
+              <div class="border-b border-gray-200 py-4 mt-3 cursor-pointer hover:bg-gray-50 rounded transition"
+                   onclick="this.querySelector('.sets-details').classList.toggle('hidden')">
+                <div class="flex justify-between items-center">
+                  <p class="font-medium text-gray-700">${w.date || ''}</p>
+                  <span class="text-gray-400 text-sm">Click to expand</span>
+                </div>
+                <div class="sets-details hidden mt-3">
+                  <div class="mb-3">
+                    <p class="text-gray-600 font-medium">Session Notes:</p>
+                    <p class="text-gray-500 ml-4">${w.notes || 'No notes recorded'}</p>
+                  </div>
+                  <div class="mb-3">
+                    <p class="text-gray-600 font-medium">Recommendation:</p>
+                    <p class="text-gray-500 ml-4">${w.recommendation || 'No recommendation recorded'}</p>
+                  </div>
+                  <div class="mt-4">
+                    <p class="text-gray-600 font-medium mb-2">Sets:</p>
+                    ${setsHtml || '<p class="text-gray-500 ml-4">No sets recorded</p>'}
+                  </div>
+                </div>
               </div>
             `;
           });

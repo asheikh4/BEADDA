@@ -153,7 +153,8 @@ def finish_set(data):
         # --- ADDED: generate overall feedback for this set ---
         exercise_type = current_set.get('exercise', 'exercise')
         cues_for_set = current_set.get('cues_list', [])
-        feedback_sentence = generate_feedback_from_cues(cues_for_set, exercise_type)
+        reps_done = current_set.get('reps', 0)
+        feedback_sentence = generate_feedback_from_cues(cues_for_set, exercise_type, reps_done)
         
         # Emit the feedback to the client
         socketio.emit('feedback_update', {'feedback': feedback_sentence})
@@ -368,20 +369,28 @@ def get_curl_cues(m):
     return cues
 
 # --- ADDED: helper function to convert cues into feedback sentence ---
-def generate_feedback_from_cues(cues, exercise_type):
+def generate_feedback_from_cues(cues, exercise_type, reps=None):
     """
-    Given a list of cues and the exercise type, returns a concise
+    Given a list of cues, exercise type, and rep count, returns a concise
     coaching feedback sentence via Mistral AI.
     """
+    reps_text = f"I completed {reps} reps" if reps is not None else "I completed a set"
+
     if not cues:
-        return f"{exercise_type.capitalize()} form is excellent! No corrections needed."
+        return f"{exercise_type.capitalize()} form is excellent across {reps or 'your'} reps! No corrections needed."
     
+    print("asdasd")
+
     prompt = (
-        f"I performed a {exercise_type}. The coach cues during the set were: "
-        + "; ".join(cues) +
-        ". Give one concise, clear sentence summarizing overall feedback." +
-        "Be specific and actionable, but ensure a physiotherapy patient could understand it. Do not have punction in your response."
+        f"{reps_text} of {exercise_type}. "
+        f"The coach cues during the set were: " + "; ".join(cues) + ". "
+        "Summarize this feedback into one clear, actionable coaching sentence. "
+        "Make it specific and physiotherapy-appropriate. "
+        "Avoid punctuation in the response."
     )
+
+    print(f"Generating feedback with prompt: {prompt}")
+
     try:
         response = mistral_client.chat.complete(
             model=MODEL_NAME,
@@ -392,7 +401,7 @@ def generate_feedback_from_cues(cues, exercise_type):
         feedback = response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Error generating feedback via Mistral: {e}")
-        feedback = "Error generating feedback."
+        feedback = "No feedback."
     return feedback
 
 
