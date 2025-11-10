@@ -97,6 +97,7 @@ def start_live_tracking():
     window_size = 200  # about 2 seconds at 100 Hz
     print("Starting live EMG + EEG tracking...\n")
 
+
     while True:
         sample, timestamp = inlet.pull_sample()
         emg_window.append(sample[0])
@@ -118,6 +119,12 @@ def start_live_tracking():
 
             print(f"EMG: {emg_percent:6.1f}% | EEG: {eeg_percent:6.1f}% | "
                 f"RMS (µV): {emg_rms:6.3f} / {eeg_rms:6.3f}", end='\r')
+
+            # Emit live percent update to frontend
+            socketio.emit('live_percent_update', {
+                'emg_percent': float(emg_percent),
+                'eeg_percent': float(eeg_percent)
+            })
 
 
 
