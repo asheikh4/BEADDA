@@ -110,6 +110,13 @@
         timeout: 10000
     });
 
+    
+    // Listen for feedback updates
+    socket.on('feedback_update', (data) => {
+      console.log("Received feedback update:", data.feedback);
+      document.getElementById('advice').textContent = data.feedback;
+    });
+
     // Add connection status logging
     socket.on('connect', () => {
         console.log('Connected to Socket.IO server');
@@ -239,6 +246,7 @@
       document.getElementById('emgPercent').textContent = data.emg_percent.toFixed(1) + '%';
       document.getElementById('eegPercent').textContent = data.eeg_percent.toFixed(1) + '%';
     });
+
 
   </script>
 </body>

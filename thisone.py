@@ -154,6 +154,10 @@ def finish_set(data):
         exercise_type = current_set.get('exercise', 'exercise')
         cues_for_set = current_set.get('cues_list', [])
         feedback_sentence = generate_feedback_from_cues(cues_for_set, exercise_type)
+        
+        # Emit the feedback to the client
+        socketio.emit('feedback_update', {'feedback': feedback_sentence})
+        
         print(f"\n=== SET FEEDBACK ===\nExercise: {exercise_type} | Feedback: {feedback_sentence}\n===================\n")
         # --- END ADDED ---
 
@@ -175,12 +179,18 @@ def finish_session(data):
     # Prepare sets for Firestore (convert keys)
     firestore_sets = []
     for s in sets:
-        firestore_sets.append({
-            "exercise": s["exercise"].capitalize(),
-            "reps": s["reps"],
-            "max_muscle_exertion": round(s["max_emg_rms"], 2),
-            "max_neural_exertion": round(s["max_eeg_rms"], 2)
-        })
+        try:
+            # Use get() method with defaults to handle missing keys safely
+            firestore_sets.append({
+                "exercise": s.get("exercise", "unknown").capitalize(),
+                "reps": s.get("reps", 0),
+                "max_muscle_exertion": round(float(s.get("max_emg_rms", 0.0)), 2),
+                "max_neural_exertion": round(float(s.get("max_eeg_rms", 0.0)), 2)
+            })
+        except Exception as e:
+            print(f"Error processing set: {s}")
+            print(f"Error details: {e}")
+            continue  # Skip this set if there's an error
     workout = {
         "date": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "notes": "Generic session notes.",
