@@ -78,12 +78,12 @@
     </div>
 
     <!-- Advice / Text Output below exertion -->
-    <div class="md:col-span-2 bg-white p-6  shadow">
+    <div class="md:col-span-2 bg-white p-6 shadow">
       <h3 class="text-xl font-semibold text-gray-700 mb-3">Advice & Insights</h3>
-      <p id="advice" class="text-gray-500">
-        Real-time analysis, coaching feedback, or EMG-based advice.
-      </p>
+      <div id="adviceContainer" class="space-y-3">
+        <p class="text-gray-500">Real-time analysis, coaching feedback, or EMG-based advice.</p>
       </div>
+    </div>
 
       <!-- Sets Section -->
       <div class="md:col-span-2 bg-white p-6 shadow mt-4">
@@ -114,7 +114,35 @@
     // Listen for feedback updates
     socket.on('feedback_update', (data) => {
       console.log("Received feedback update:", data.feedback);
-      document.getElementById('advice').textContent = data.feedback;
+      const container = document.getElementById('adviceContainer');
+      
+      // Create new feedback element with timestamp
+      const newFeedback = document.createElement('div');
+      newFeedback.className = 'p-3 border-l-4 border-purple-500 bg-gray-50';
+      
+      // Clean up the feedback text by removing trailing punctuation
+      const cleanFeedback = data.feedback.replace(/[.!?,]+$/, '','*');
+      
+      const timestamp = new Date().toLocaleTimeString();
+      newFeedback.innerHTML = `
+        <div class="flex items-center justify-between">
+          <p class="text-gray-700">${cleanFeedback}</p>
+          <span class="text-sm text-gray-400 ml-2">${timestamp}</span>
+        </div>
+      `;
+
+      // Add new feedback at the top
+      if (container.firstChild) {
+        container.insertBefore(newFeedback, container.firstChild);
+      } else {
+        container.appendChild(newFeedback);
+      }
+
+      // Keep only the last 5 feedback messages (optional)
+      const maxFeedbacks = 5;
+      while (container.children.length > maxFeedbacks) {
+        container.removeChild(container.lastChild);
+      }
     });
 
     // Add connection status logging
@@ -228,7 +256,14 @@
 
     // Finish Session button handler
     document.getElementById('btnFinishSession').addEventListener('click', () => {
-      socket.emit('finish_session', {});
+      // Collect all feedback from adviceContainer
+      const adviceElements = document.querySelectorAll('#adviceContainer .text-gray-700');
+      const allFeedback = Array.from(adviceElements)
+        .map(el => el.textContent.trim())
+        .filter(text => text !== 'Real-time analysis, coaching feedback, or EMG-based advice.')
+        .join('\n');
+      
+      socket.emit('finish_session', { notes: allFeedback });
     });
 
     // Send event when button is pressed

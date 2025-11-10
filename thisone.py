@@ -191,9 +191,12 @@ def finish_session(data):
             print(f"Error processing set: {s}")
             print(f"Error details: {e}")
             continue  # Skip this set if there's an error
+    # Get notes from the frontend data or use default
+    session_notes = data.get('notes', 'No feedback recorded for this session.')
+    
     workout = {
         "date": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "notes": "Generic session notes.",
+        "notes": session_notes,
         "recommendation": "Generic recommendation.",
         "sets": firestore_sets
     }
@@ -376,13 +379,15 @@ def generate_feedback_from_cues(cues, exercise_type):
     prompt = (
         f"I performed a {exercise_type}. The coach cues during the set were: "
         + "; ".join(cues) +
-        ". Give one concise, clear sentence summarizing overall feedback."
+        ". Give one concise, clear sentence summarizing overall feedback." +
+        "Be specific and actionable, but ensure a physiotherapy patient could understand it. Do not have punction in your response."
     )
     try:
         response = mistral_client.chat.complete(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
-            stream=False
+            stream=False,
+            temperature=0.98,
         )
         feedback = response.choices[0].message.content.strip()
     except Exception as e:
