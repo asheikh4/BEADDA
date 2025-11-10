@@ -24,3 +24,5 @@ TestResults.xml
 serviceAccountKey.json
 
 .venv
+
+.src/CV/__pycache__/
