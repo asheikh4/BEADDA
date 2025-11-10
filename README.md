@@ -45,12 +45,23 @@ Recovering from injuries often requires extensive physiotherapy, but patients st
 [Patient Sensors] → [Python Processing & AI] → [Dashboard / Clinician Interface]
 
 
-**Key Components:**  
+## Key Components
 - Python backend using Flask and SocketIO  
 - MediaPipe for pose detection and rep tracking  
 - EMG/EEG signal processing using `pylsl` and NumPy  
 - Firebase Firestore for data storage  
 - Mistral AI for generating concise coaching feedback  
+
+---
+
+## Installation & Setup
+
+1. **Clone the repository:**  
+```bash
+git clone <repo_url>
+cd BEADDA
+
+
 
 ---
 
