@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Physiotherapist Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter Tight', sans-serif;
+    }
+
+    /* Smooth slide-in for details panel */
+    .slide-panel {
+      transition: transform 0.3s ease-in-out;
+    }
+
+    .slide-in {
+      transform: translateX(0%);
+    }
+
+    .slide-out {
+      transform: translateX(100%);
+    }
+  </style>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
+    import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDT8C83W91GnnRSBSkGghaAeuKQ-E_yFDI",
+      authDomain: "beadda-650e4.firebaseapp.com",
+      projectId: "beadda-650e4",
+      storageBucket: "beadda-650e4.firebasestorage.app",
+      messagingSenderId: "442357693497",
+      appId: "1:442357693497:web:ea0935f7da910ee2e261e8",
+      measurementId: "G-S0SHW9GE12"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const clientsDiv = document.getElementById('clients');
+    const detailsPanel = document.getElementById('detailsPanel');
+    const detailsContent = document.getElementById('detailsContent');
+    const closeBtn = document.getElementById('closeBtn');
+    const sortSelect = document.getElementById('sortSelect');
+
+    // Data store for current clients
+    let clientsData = [];
+    // Default sort
+    let currentSort = 'name_asc';
+
+    function parseDateString(s) {
+      if (!s) return new Date(0);
+      // Replace space with 'T' to create a parsable ISO string
+      return new Date(s.replace(' ', 'T'));
+    }
+
+    function sortClients(arr) {
+      const copy = arr.slice();
+      switch (currentSort) {
+        case 'name_asc':
+          copy.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          break;
+        case 'name_desc':
+          copy.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+          break;
+        case 'last_newest':
+          copy.sort((a, b) => parseDateString(b.last_workout) - parseDateString(a.last_workout));
+          break;
+        case 'last_oldest':
+          copy.sort((a, b) => parseDateString(a.last_workout) - parseDateString(b.last_workout));
+          break;
+        default:
+          break;
+      }
+      return copy;
+    }
+
+    function renderClients() {
+      clientsDiv.innerHTML = "";
+      const list = sortClients(clientsData);
+      list.forEach((data) => {
+        const card = document.createElement('div');
+        card.className = "bg-white  shadow p-6 mb-4 cursor-pointer hover:shadow-lg transition";
+        const lastWorkout = data.last_workout || 'N/A';
+        const lastWorkoutRec = (data.workouts && data.workouts.length)
+          ? (data.workouts[data.workouts.length - 1] && data.workouts[data.workouts.length - 1].recommendation) || 'N/A'
+          : 'N/A';
+        card.innerHTML = `
+          <h2 class="text-xl font-semibold text-gray-800">${data.name || 'Unnamed'}</h2>
+          <p class="text-gray-600">Last Workout: ${lastWorkout}</p>
+          <p class="text-gray-600">Recommendation: ${lastWorkoutRec}</p>
+        `;
+        card.addEventListener('click', () => {
+          // Populate details panel
+          let workoutHtml = "";
+          const workouts = data.workouts || [];
+          workouts.forEach(w => {
+            workoutHtml += `
+              <div class="border-b border-gray-200 py-2 mt-3">
+                <p class="font-medium text-gray-700">${w.date || ''}</p>
+                <p class="text-gray-600">Recommendation: ${w.recommendation || ''}</p>
+                <p class="text-gray-500">Notes: ${w.notes || ''}</p>
+              </div>
+            `;
+          });
+          detailsContent.innerHTML = `
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4">${data.name || 'Unnamed'}</h2>
+            <div>${workoutHtml}</div>
+          `;
+          detailsPanel.classList.remove('slide-out');
+          detailsPanel.classList.add('slide-in');
+        });
+        clientsDiv.appendChild(card);
+      });
+    }
+
+    // Close panel
+    closeBtn.addEventListener('click', () => {
+      detailsPanel.classList.remove('slide-in');
+      detailsPanel.classList.add('slide-out');
+    });
+
+    // Change sort selection
+    sortSelect.addEventListener('change', (e) => {
+      currentSort = e.target.value;
+      renderClients();
+    });
+
+    // Listen for real-time updates
+    onSnapshot(collection(db, "clients"), (snapshot) => {
+      clientsData = snapshot.docs.map(d => d.data());
+      renderClients();
+    });
+  </script>
+</head>
+
+<body class="bg-gray-100 p-6 min-h-screen relative">
+
+  <h2 class="text-1xl font-bold text-gray-900">Welcome back, Dr. Doctor!</h2>
+  <h1 class="text-3xl font-bold text-gray-900 mb-6">Physiotherapist Client Activity Dashboard</h1>
+
+  <div class="flex items-center justify-between mb-4">
+    <div class="text-sm text-gray-600">Sort by:
+      <select id="sortSelect" class="ml-2 p-2 border rounded bg-white">
+        <option value="name_asc">Name (A → Z)</option>
+        <option value="name_desc">Name (Z → A)</option>
+        <option value="last_newest">Last Workout (Newest)</option>
+        <option value="last_oldest">Last Workout (Oldest)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Client cards -->
+  <div id="clients" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+
+  <!-- Slide-in Details Panel -->
+  <div id="detailsPanel"
+    class="fixed top-0 right-0 h-full w-96 bg-white shadow-2xl p-6 slide-panel slide-out overflow-y-auto z-50">
+    <button id="closeBtn" class="text-gray-500 hover:text-gray-800 mb-4">&larr; Back</button>
+    <div id="detailsContent"></div>
+  </div>
+
+</body>
+
+</html>
