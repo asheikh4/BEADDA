@@ -12,7 +12,7 @@ import threading
 # CAMERA SETUP
 import cv2
 
-from main import cap, global_frame
+import main
 
 # camera=cv2.VideoCapture(0)
 
@@ -37,20 +37,43 @@ def video():
 
 # FRAMES FOR CAMERA
 def generate_frames():
-    global cap
-    
+    # Prefer the annotated frame produced by main (main.global_frame).
+    # Fall back to reading directly from the camera (main.cap) if no annotated
+    # frame is available yet.
     while True:
-            
-        ## read the camera frame
-        success,frame=cap.read()
-        if not success:
-            break
-        else:
-            ret,buffer=cv2.imencode('.jpg',frame)
-            frame=buffer.tobytes()
+        frame = None
+        try:
+            # If main has a live annotated frame, use a copy of it for thread-safety
+            if hasattr(main, 'global_frame') and main.global_frame is not None:
+                frame = main.global_frame.copy()
+            else:
+                # Fall back to direct capture from the camera
+                success, frame = main.cap.read()
+                if not success:
+                    break
+        except Exception:
+            # Any error, try a direct camera read as a last resort
+            try:
+                success, frame = main.cap.read()
+                if not success:
+                    break
+            except Exception:
+                break
 
-        yield(b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        # Ensure we have a valid frame before encoding
+        if frame is None or getattr(frame, 'size', 0) == 0:
+            time.sleep(0.01)
+            continue
+
+        ret, buffer = cv2.imencode('.jpg', frame)
+        if not ret:
+            time.sleep(0.01)
+            continue
+
+        frame_bytes = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
 
 
