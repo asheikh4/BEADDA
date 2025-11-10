@@ -8,6 +8,20 @@ from flask import Flask, render_template, Response
 from flask_socketio import SocketIO
 import threading
 
+# --- ADDED: Mistral AI client ---
+import os
+from mistralai import Mistral
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_KEY = os.getenv("MISTRAL_API_KEY")
+if not API_KEY:
+    print("Warning: MISTRAL_API_KEY not set. Feedback will not be generated.")
+mistral_client = Mistral(api_key=API_KEY)
+MODEL_NAME = "mistral-medium-latest"
+
+
 # CAMERA SETUP
 import cv2
 
@@ -114,6 +128,13 @@ def finish_set(data):
     # Finish current set, save stats
     if current_set:
         current_set['active'] = False
+        # --- ADDED: generate overall feedback for this set ---
+        exercise_type = current_set.get('exercise', 'exercise')
+        cues_for_set = current_set.get('cues_list', [])
+        feedback_sentence = generate_feedback_from_cues(cues_for_set, exercise_type)
+        print(f"\n=== SET FEEDBACK ===\nExercise: {exercise_type} | Feedback: {feedback_sentence}\n===================\n")
+        # --- END ADDED ---
+
         sets.append(current_set)
         current_set = None
         emit_sets()
@@ -268,6 +289,33 @@ def get_curl_cues(m):
         cues.append("Keep upper arm still")
     return cues
 
+# --- ADDED: helper function to convert cues into feedback sentence ---
+def generate_feedback_from_cues(cues, exercise_type):
+    """
+    Given a list of cues and the exercise type, returns a concise
+    coaching feedback sentence via Mistral AI.
+    """
+    if not cues:
+        return f"{exercise_type.capitalize()} form is excellent! No corrections needed."
+    
+    prompt = (
+        f"I performed a {exercise_type}. The coach cues during the set were: "
+        + "; ".join(cues) +
+        ". Give one concise, clear sentence summarizing overall feedback."
+    )
+    try:
+        response = mistral_client.chat.complete(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            stream=False
+        )
+        feedback = response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Error generating feedback via Mistral: {e}")
+        feedback = "Error generating feedback."
+    return feedback
+
+
 def render_squat(frame, m, knee, reps, phase, cues, lumbar_excursion_deg=None):
     """Render squat-specific UI elements."""
     jp = m["joints_px"]
@@ -387,6 +435,8 @@ def generate_frames():
                     if current_set and current_set['active']:
                         current_set['reps'] = reps
                         current_set['exercise'] = exercise
+                        current_set.setdefault('cues_list', []).extend(cues)
+
                         # Use latest EMG/EEG RMS from live tracking if available
                         # For now, set to 0.0 (can be updated from live tracking)
             elif exercise == "curl":
@@ -404,6 +454,8 @@ def generate_frames():
                     if current_set and current_set['active']:
                         current_set['reps'] = reps
                         current_set['exercise'] = exercise
+                        current_set.setdefault('cues_list', []).extend(cues)
+
                         # Use latest EMG/EEG RMS from live tracking if available
                         # For now, set to 0.0 (can be updated from live tracking)
         else:
