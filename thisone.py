@@ -18,6 +18,9 @@ if str(cv_dir) not in sys.path:
     sys.path.insert(0, str(cv_dir))
 
 # Import CV modules
+import firebase_admin
+from firebase_admin import credentials, firestore
+from datetime import datetime
 import mediapipe as mp
 from pose_utils import (put, draw_angle_with_arc, EMA, MedianFilter, HoldTimer)
 from exercises import (squat_metrics, wallsit_metrics, curl_metrics, RepCounter, 
@@ -26,6 +29,11 @@ from exercises import (squat_metrics, wallsit_metrics, curl_metrics, RepCounter,
 # SETTING UP FLASK STUFF
 app = Flask(__name__)
 socketio = SocketIO(app)
+
+# Firebase setup (reference: testclients.py)
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
 # Camera setup
 CAM_INDEX = 0
@@ -89,6 +97,10 @@ max_eeg_rms = 0
 sets = []
 current_set = None
 
+# Hardcoded client email for demo
+CLIENT_EMAIL = "christopherwilliams@example.net"
+CLIENT_NAME = "Demo Client"
+
 # Helper to emit all sets to frontend
 
 def emit_sets():
@@ -124,6 +136,49 @@ def remove_set(data):
     set_id = data.get('id')
     sets = [s for s in sets if s['id'] != set_id]
     emit_sets()
+
+# Finish Session handler: save workout to Firestore
+@socketio.on('finish_session')
+def finish_session(data):
+    global sets
+    # Prepare sets for Firestore (convert keys)
+    firestore_sets = []
+    for s in sets:
+        firestore_sets.append({
+            "exercise": s["exercise"].capitalize(),
+            "reps": s["reps"],
+            "max_muscle_exertion": round(s["max_emg_rms"], 2),
+            "max_neural_exertion": round(s["max_eeg_rms"], 2)
+        })
+    workout = {
+        "date": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "notes": "Generic session notes.",
+        "recommendation": "Generic recommendation.",
+        "sets": firestore_sets
+    }
+    client_ref = db.collection("clients").document(CLIENT_EMAIL)
+    # Try to get existing client data
+    client_doc = client_ref.get()
+    if client_doc.exists:
+        client_data = client_doc.to_dict()
+        workouts = client_data.get("workouts", [])
+        workouts.append(workout)
+        client_ref.set({
+            "name": client_data.get("name", CLIENT_NAME),
+            "email": CLIENT_EMAIL,
+            "last_workout": workout["date"],
+            "workouts": workouts
+        })
+    else:
+        client_ref.set({
+            "name": CLIENT_NAME,
+            "email": CLIENT_EMAIL,
+            "last_workout": workout["date"],
+            "workouts": [workout]
+        })
+    print(f"Saved workout for {CLIENT_EMAIL} with {len(firestore_sets)} sets.")
+    # Optionally, emit a confirmation to frontend
+    socketio.emit('session_saved', {"success": True})
 
 def start_live_tracking():
     global inlet, rest_emg_rms, rest_eeg_rms, max_emg_rms, max_eeg_rms

@@ -91,6 +91,7 @@
           <h3 class="text-xl font-semibold text-purple-700">Sets</h3>
           <button id="btnStartSet" class="px-4 py-2 bg-purple-600 text-white rounded shadow hover:bg-purple-700 transition">Start New Set</button>
           <button id="btnFinishSet" style="display:none" class="ml-2 px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 transition">Finish Set</button>
+          <button id="btnFinishSession" class="ml-2 px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition">Finish Session</button>
         </div>
         <div id="setsList"></div>
       </div>
@@ -196,6 +197,11 @@
       window.removeSet = function(id) {
         socket.emit('remove_set', {id});
       }
+
+      // Finish Session button handler
+      document.getElementById('btnFinishSession').addEventListener('click', () => {
+        socket.emit('finish_session', {});
+      });
 
     // Send event when button is pressed
     document.getElementById('actionBtn').addEventListener('click', () => {
