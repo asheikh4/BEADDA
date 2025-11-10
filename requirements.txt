@@ -1,6 +1,7 @@
+numpy<2.0
 opencv-python>=4.8.0
-mediapipe>=0.10.0
-numpy>=1.24.0
+mediapipe==0.10.14
+
 
 # NOTE: MediaPipe requires Python 3.8-3.11
 # Then create a virtual environment: python3.11 -m venv .venv

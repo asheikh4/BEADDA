@@ -60,6 +60,10 @@ SQUAT_TOP_DEG    = 140.0
 CURL_BOTTOM_DEG  = 45.0  # Full contraction (research-based)
 CURL_TOP_DEG     = 130.0  # Extended arm
 
+# Global variables for Flask integration
+cap = cv2.VideoCapture(CAM_INDEX)
+processed_frame = None
+
 # ---------------- Setup ----------------
 mp_pose   = mp.solutions.pose
 mp_draw   = mp.solutions.drawing_utils
@@ -433,9 +437,11 @@ def get_curl_cues(m):
     return cues
 
 def main():
+    global cap
+
     """Main application loop with enhanced data collection quality checks."""
     # Initialize camera with error handling
-    cap = cv2.VideoCapture(CAM_INDEX)
+    # cap = cv2.VideoCapture(CAM_INDEX)
     if not cap.isOpened():
         print(f"Error: Could not open camera {CAM_INDEX}")
         print("Please check that your camera is connected and not being used by another application.")
