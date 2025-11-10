@@ -85,7 +85,45 @@ rest_eeg_rms = 0
 max_emg_rms = 0
 max_eeg_rms = 0
 
+# Set tracking
+sets = []
+current_set = None
 
+# Helper to emit all sets to frontend
+
+def emit_sets():
+    socketio.emit('sets_update', {'sets': sets, 'current_set': current_set})
+
+@socketio.on('start_set')
+def start_set(data):
+    global current_set
+    # Start a new set
+    current_set = {
+        'exercise': exercise,
+        'reps': 0,
+        'max_emg_rms': 0.0,
+        'max_eeg_rms': 0.0,
+        'active': True,
+        'id': int(time.time() * 1000)  # unique id
+    }
+    emit_sets()
+
+@socketio.on('finish_set')
+def finish_set(data):
+    global current_set, sets
+    # Finish current set, save stats
+    if current_set:
+        current_set['active'] = False
+        sets.append(current_set)
+        current_set = None
+        emit_sets()
+
+@socketio.on('remove_set')
+def remove_set(data):
+    global sets
+    set_id = data.get('id')
+    sets = [s for s in sets if s['id'] != set_id]
+    emit_sets()
 
 def start_live_tracking():
     global inlet, rest_emg_rms, rest_eeg_rms, max_emg_rms, max_eeg_rms
@@ -125,7 +163,10 @@ def start_live_tracking():
                 'emg_percent': float(emg_percent),
                 'eeg_percent': float(eeg_percent)
             })
-
+            # Track max RMS for current set
+            if current_set and current_set['active']:
+                current_set['max_emg_rms'] = max(current_set.get('max_emg_rms', 0.0), float(emg_rms))
+                current_set['max_eeg_rms'] = max(current_set.get('max_eeg_rms', 0.0), float(eeg_rms))
 
 
 
@@ -343,12 +384,11 @@ def generate_frames():
                     render_squat(frame, m, knee, reps, phase, cues, lumbar_excursion)
                     # print(int(reps))
                     socketio.emit('rep_update', {'reps': reps})
-            elif exercise == "wallsit":
-                m = wallsit_metrics(lm, w, h, mp_pose)
-                if m:
-                    seconds = hold_timer.update(m["knee_90"] and m["back_vertical"])
-                    cues = get_wallsit_cues(m)
-                    render_wallsit(frame, m, seconds, cues)
+                    if current_set and current_set['active']:
+                        current_set['reps'] = reps
+                        current_set['exercise'] = exercise
+                        # Use latest EMG/EEG RMS from live tracking if available
+                        # For now, set to 0.0 (can be updated from live tracking)
             elif exercise == "curl":
                 m = curl_metrics(lm, w, h, mp_pose, side=curl_side)
                 if m:
@@ -361,6 +401,11 @@ def generate_frames():
                     cues = get_curl_cues(m)
                     render_curl(frame, m, elbow, reps, phase, cues, curl_side)
                     socketio.emit('rep_update', {'reps': reps})
+                    if current_set and current_set['active']:
+                        current_set['reps'] = reps
+                        current_set['exercise'] = exercise
+                        # Use latest EMG/EEG RMS from live tracking if available
+                        # For now, set to 0.0 (can be updated from live tracking)
         else:
             # No pose detected
             put(frame, "No pose detected. Position yourself in frame.", 30, (0, 0, 255))

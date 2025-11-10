@@ -83,6 +83,17 @@
       <p id="advice" class="text-gray-500">
         Real-time analysis, coaching feedback, or EMG-based advice.
       </p>
+      </div>
+
+      <!-- Sets Section -->
+      <div class="md:col-span-2 bg-white p-6 shadow mt-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xl font-semibold text-purple-700">Sets</h3>
+          <button id="btnStartSet" class="px-4 py-2 bg-purple-600 text-white rounded shadow hover:bg-purple-700 transition">Start New Set</button>
+          <button id="btnFinishSet" style="display:none" class="ml-2 px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 transition">Finish Set</button>
+        </div>
+        <div id="setsList"></div>
+      </div>
     </div>
     <!-- <div id="counter">test</div> -->
 
@@ -131,6 +142,60 @@
       document.getElementById('repCount').textContent = data.reps;
       // console.log("Received rep update:", data.reps);
     });
+
+      // Start new set button
+      document.getElementById('btnStartSet').addEventListener('click', () => {
+        socket.emit('start_set', {});
+      });
+      // Finish set button
+      document.getElementById('btnFinishSet').addEventListener('click', () => {
+        socket.emit('finish_set', {});
+      });
+      // Listen for sets update
+      socket.on('sets_update', (data) => {
+        const sets = data.sets || [];
+        const setsList = document.getElementById('setsList');
+        setsList.innerHTML = '';
+        // Show/hide Finish/Start Set buttons depending on set state
+        const currentSet = data.current_set;
+        const btnStartSet = document.getElementById('btnStartSet');
+        const btnFinishSet = document.getElementById('btnFinishSet');
+        if (currentSet && currentSet.active) {
+          btnStartSet.style.display = 'none';
+          btnFinishSet.style.display = '';
+        } else {
+          btnStartSet.style.display = '';
+          btnFinishSet.style.display = 'none';
+        }
+        if (sets.length === 0) {
+          setsList.innerHTML = '<p class="text-gray-400">No sets yet.</p>';
+          return;
+        }
+        sets.forEach(set => {
+          let exerciseColor = 'text-purple-700';
+          if (set.exercise === 'squat') exerciseColor = 'text-yellow-600';
+          else if (set.exercise === 'wallsit') exerciseColor = 'text-blue-600';
+          else if (set.exercise === 'curl') exerciseColor = 'text-pink-600';
+          const div = document.createElement('div');
+          div.className = 'border rounded p-3 mb-2 flex flex-col md:flex-row md:items-center justify-between bg-gray-50';
+          div.innerHTML = `
+            <div>
+              <span class="font-bold ${exerciseColor}">${set.exercise.charAt(0).toUpperCase() + set.exercise.slice(1).toLowerCase()}</span>
+              <span class="ml-4">Reps: <span class="font-semibold">${set.reps}</span></span>
+              <span class="ml-4">Max Muscle: <span class="font-semibold">${set.max_emg_rms.toFixed(2)} µV</span></span>
+              <span class="ml-4">Max Neural: <span class="font-semibold">${set.max_eeg_rms.toFixed(2)} µV</span></span>
+              ${set.active ? '<span class="ml-4 text-green-600 font-bold">Active</span>' : ''}
+            </div>
+            <button class="ml-4 px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600" onclick="window.removeSet(${set.id})">Remove</button>
+          `;
+          setsList.appendChild(div);
+        });
+      });
+
+      // Remove set handler (global for inline onclick)
+      window.removeSet = function(id) {
+        socket.emit('remove_set', {id});
+      }
 
     // Send event when button is pressed
     document.getElementById('actionBtn').addEventListener('click', () => {
