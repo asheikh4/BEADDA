@@ -7,9 +7,14 @@ from flask_socketio import SocketIO
 import time
 import threading
 
+
+
 # CAMERA SETUP
 import cv2
-camera=cv2.VideoCapture(0)
+
+from main import cap, global_frame
+
+# camera=cv2.VideoCapture(0)
 
 # SETTING UP FLASK STUFF
 
@@ -32,10 +37,12 @@ def video():
 
 # FRAMES FOR CAMERA
 def generate_frames():
+    global cap
+    
     while True:
             
         ## read the camera frame
-        success,frame=camera.read()
+        success,frame=cap.read()
         if not success:
             break
         else:
