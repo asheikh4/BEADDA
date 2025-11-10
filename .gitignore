@@ -26,3 +26,5 @@ serviceAccountKey.json
 .venv
 
 .src/CV/__pycache__/
+
+__pycache__/
