@@ -365,6 +365,29 @@ def begin_calibration(data):
         is_collecting_data = True
         thread2.start()
 
+
+# Handle exercise change requests from the web UI
+@socketio.on('change_exercise')
+def handle_change_exercise(data):
+    """Change the global exercise mode based on client request.
+
+    Expects data to be a dict with key 'exercise' and value one of: 'squat',
+    'wallsit', 'curl'. Emits an 'exercise_changed' event back to clients.
+    """
+    global exercise
+    try:
+        ex = data.get('exercise')
+    except Exception:
+        ex = None
+
+    if ex in ('squat', 'wallsit', 'curl'):
+        exercise = ex
+        print(f"Exercise changed to: {exercise}")
+        # notify connected clients of the change
+        socketio.emit('exercise_changed', {'exercise': exercise})
+    else:
+        print(f"Received invalid exercise change request: {data}")
+
 # MAIN
 if __name__ == '__main__':
     # Setup camera FIRST (before starting server)

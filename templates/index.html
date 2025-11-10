@@ -37,6 +37,19 @@
       </div>
     </div>
 
+    <!-- Exercise selection buttons (below webcam) -->
+    <div class="md:col-span-2 flex items-center justify-center gap-3 mt-3">
+      <button id="btnSquat" data-exercise="squat" class="px-4 py-2 bg-sky-600 text-white rounded shadow hover:bg-sky-700 transition">
+        Squat
+      </button>
+      <button id="btnWallsit" data-exercise="wallsit" class="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 transition">
+        Wall-sit
+      </button>
+      <button id="btnCurl" data-exercise="curl" class="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 transition">
+        Curl
+      </button>
+    </div>
+
     <!-- Header -->
     <p class="md:col-span-2 py-[0px] text-xl font-medium tracking-tighter text-gray-900 text-center">Physiotherapy
       Client
@@ -73,6 +86,36 @@
 
   <script>
     const socket = io();
+
+    // Helper: update active button styles
+    function setActiveButton(selectedId) {
+      ['btnSquat', 'btnWallsit', 'btnCurl'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === selectedId) {
+          el.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300');
+          el.classList.add('bg-sky-600', 'text-white', 'hover:bg-sky-700');
+        } else {
+          el.classList.remove('bg-sky-600', 'text-white', 'hover:bg-sky-700');
+          el.classList.add('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300');
+        }
+      });
+    }
+
+    // Wire up exercise buttons
+    ['btnSquat', 'btnWallsit', 'btnCurl'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('click', () => {
+        const ex = el.getAttribute('data-exercise');
+        socket.emit('change_exercise', { exercise: ex });
+        // Optimistically update UI
+        setActiveButton(id);
+      });
+    });
+
+    // Set default active (server default is 'squat')
+    setActiveButton('btnSquat');
 
     // Live counter updates
     socket.on('counter_update', (data) => {
