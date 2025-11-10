@@ -42,7 +42,16 @@ from exercises import (squat_metrics, wallsit_metrics, curl_metrics, RepCounter,
 
 # SETTING UP FLASK STUFF
 app = Flask(__name__)
-socketio = SocketIO(app)
+app.config['SECRET_KEY'] = 'secret!'
+socketio = SocketIO(app, 
+    cors_allowed_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+    async_mode='threading',
+    logger=True,
+    engineio_logger=True,
+    ping_timeout=60,
+    ping_interval=25,
+    allow_upgrades=True
+)
 
 # Firebase setup (reference: testclients.py)
 cred = credentials.Certificate("serviceAccountKey.json")
@@ -122,7 +131,8 @@ def emit_sets():
 
 @socketio.on('start_set')
 def start_set(data):
-    global current_set
+    global current_set, sets, exercise
+    print("hiiiiii")
     # Start a new set
     current_set = {
         'exercise': exercise,
@@ -670,9 +680,9 @@ if __name__ == '__main__':
     print(f"Camera initialized: {actual_w}x{actual_h}")
     print(f"Computer Vision: {exercise} mode")
     print(f"MediaPipe Pose Detection: Enabled")
+    print("Starting server on http://localhost:8080")
 
-
-    socketio.run(app, debug=True, port=8080, host='0.0.0.0')
+    socketio.run(app, host='127.0.0.1', port=8080, debug=True, allow_unsafe_werkzeug=True)
     
     # # Try to initialize EMG stream (optional)
     # try:
