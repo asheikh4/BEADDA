@@ -1,9 +1,9 @@
 # BEADDA
 
-**Team:** Aahil Ansari, Eshal Mir, Daniel Tran, Bayan Shayab, Ayman Sheikh, Dylan Sheen  
+**Team:** Bayan Shayab, Eshal Mir, Aahil Ansari, Daniel Tran, Dylan Sheen, Ayman Sheikh
 
 **Project Description:**  
-BEADDA is an AI-powered physiotherapy rehabilitation platform designed to remotely monitor, analyze, and optimize patient recovery. It integrates multimodal data streams—including EEG (brain activity), EMG (muscle activation), and computer-vision-based motion tracking—to assess both physical form and cognitive engagement during rehabilitation exercises.  
+BEADDA is an AI-powered physiotherapy rehabilitation platform designed to remotely monitor, analyze, and optimize patient recovery. It integrates multimodal data streams, including EEG (brain activity), EMG (muscle activation), and computer-vision-based motion tracking, to assess both physical form and cognitive engagement during rehabilitation exercises.  
 
 ---
 
@@ -44,7 +44,14 @@ Recovering from injuries often requires extensive physiotherapy, but patients st
 **Overview Diagram:**  
 [Patient Sensors] → [Python Processing & AI] → [Dashboard / Clinician Interface]
 
+## Key Components
+- Python backend using Flask and SocketIO  
+- MediaPipe for pose detection and rep tracking  
+- EMG/EEG signal processing using `pylsl` and NumPy  
+- Firebase Firestore for data storage  
+- Mistral AI for generating concise coaching feedback  
 
+---
 ## Key Components
 - Python backend using Flask and SocketIO  
 - MediaPipe for pose detection and rep tracking  
@@ -55,11 +62,63 @@ Recovering from injuries often requires extensive physiotherapy, but patients st
 ---
 
 ## Installation & Setup
-
 1. **Clone the repository:**  
 ```bash
 git clone <repo_url>
 cd BEADDA
+```
+2. **Create a virtual environment and activate it:**
+```
+python -m venv venv
+venv\Scripts\activate
+```
+3. **Install dependencies:**
+```
+pip install -r requirements.txt
+```
+4. **Setup environment variables:**
+Create a .env file with:
+```
+MISTRAL_API_KEY=<your_api_key>
+```
+5. **Run the server:**
+```
+python thisone.py
+```
+---
+## Usage
+- Start the server and open the web interface
+- Connect EEG/EMG devices via LSL streams
+- Select an exercise (squat, curl, wallsit)
+- Begin a session and follow on-screen coaching cues
+- Real-time feedback and metrics appear on the clinician dashboard
+- Finish sets and sessions to save data to Firebase
+
+## Challenges & Learnings
+- Integrating multiple hardware streams (EEG, EMG, Camera) and synchronizing them
+- Maintaining real-time performance while processing high-frequency physiological data
+- Designing an intuitive dashboard for non-technical users
+- Signal processing and visualization for EMG and EEG in Python
+
+## Future Work
+- Expand to scalable clinical tool with personalized rehab recommendations
+- Integrate with telehealth platforms
+- Support elderly and pediatric users with adaptive exercises
+- Incorporate additional AI insights for predictive recovery analytics
+  
+## Acknowledgements
+- OpenBCI for EEG/EMG hardware
+- MediaPipe for pose estimation
+- Firebase for backend data storage
+- Mistral AI for feedback summarization
+
+
+
+
+
+
+
+
 
 
 
