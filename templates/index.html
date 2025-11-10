@@ -48,6 +48,9 @@
       <button id="btnCurl" data-exercise="curl" class="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 transition">
         Curl
       </button>
+      <button id="btnCalibrateEMG" class="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 transition">
+        Start EMG Calibration
+      </button>
     </div>
 
     <!-- Header -->
@@ -125,6 +128,11 @@
     // Send event when button is pressed
     document.getElementById('actionBtn').addEventListener('click', () => {
       socket.emit('button_pressed', { message: 'User pressed Start Calibration' });
+    });
+
+    // EMG calibration button event
+    document.getElementById('btnCalibrateEMG').addEventListener('click', () => {
+      socket.emit('start_emg_calibration', { message: 'User requested EMG calibration' });
     });
   </script>
 </body>
