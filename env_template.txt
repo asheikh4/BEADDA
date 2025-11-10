@@ -1,0 +1,8 @@
+# Mistral AI API Key
+# Get your API key from https://console.mistral.ai/
+# Copy this file to .env and add your API key
+MISTRAL_API_KEY=your_mistral_api_key_here
+
+# Optional: Flask secret key for production
+# SECRET_KEY=your_secret_key_here
+

@@ -1,0 +1,16 @@
+# Core dependencies
+flask>=2.3.0
+flask-socketio>=5.3.0
+python-dotenv>=1.0.0
+
+# Mistral AI
+mistralai>=1.0.0
+
+# Computer Vision (if not already installed)
+numpy<2.0
+opencv-python>=4.8.0
+mediapipe==0.10.14
+
+# Optional: For EMG functionality
+# pylsl>=1.16.0
+
